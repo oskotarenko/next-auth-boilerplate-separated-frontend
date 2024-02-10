@@ -1,48 +1,51 @@
-import NextAuth from "next-auth"
-import { UserRole } from "@prisma/client";
-import { PrismaAdapter } from "@auth/prisma-adapter";
+import NextAuth from 'next-auth';
+import { UserRole } from '@prisma/client';
+import { PrismaAdapter } from '@auth/prisma-adapter';
 
-import { db } from "@/lib/db";
-import authConfig from "./auth.config";
-import { getUserById } from "@/data/user";
-import { getTwoFactorConfirmationByUserId } from "./data/two-factor-confirmation";
-import { getAccountByUserId } from "./data/account";
+import { db } from '@/lib/db';
+import authConfig from './auth.config';
+import { getUserById, updateSettings } from './actions/user.actions';
+import {
+  deleteTwoFactorConfirmation,
+  getAccount,
+  getTwoFactorConfirmation,
+} from './actions/auth.actions';
 
 export const {
   handlers: { GET, POST },
   auth,
   signIn,
-  signOut
+  signOut,
 } = NextAuth({
   adapter: PrismaAdapter(db),
-  session: { strategy: "jwt" },
+  session: { strategy: 'jwt' },
   pages: {
-    signIn: "/auth/login",
-    error: "/auth/error",
+    signIn: '/auth/login',
+    error: '/auth/error',
   },
   events: {
     async linkAccount({ user }) {
-      await db.user.update({
-        where: { id: user.id },
-        data: { emailVerified: new Date() }
-      })
+      await updateSettings(user.id, {
+        emailVerified: new Date().toISOString(),
+      });
     },
   },
   callbacks: {
     async signIn({ user, account }) {
       // Allow OAuth without email werification
-      if (account?.type !== "credentials") return true;
+      if (account?.type !== 'credentials') return true;
 
       // Prevent sign in without email verification for credentials provider
       const existingUser = await getUserById(user.id);
       if (!existingUser?.emailVerified) return false;
 
       if (existingUser.isTwoFactorEnabled) {
-        const twoFactorConfirmation = await getTwoFactorConfirmationByUserId(existingUser.id);
-
+        const twoFactorConfirmation = await getTwoFactorConfirmation(
+          existingUser.id
+        );
         if (!twoFactorConfirmation) return false;
 
-        await db.twoFactorConfirmation.delete({ where: { id: twoFactorConfirmation.id } });
+        await deleteTwoFactorConfirmation(twoFactorConfirmation.id);
       }
 
       return true;
@@ -53,7 +56,7 @@ export const {
       const existingUser = await getUserById(token.sub);
       if (!existingUser) return token;
 
-      const existingAccount = await getAccountByUserId(existingUser.id);
+      const existingAccount = await getAccount(existingUser.id);
 
       token.isOAuth = !!existingAccount;
       token.name = existingUser.name;
@@ -84,5 +87,5 @@ export const {
       return session;
     },
   },
-  ...authConfig
-})
+  ...authConfig,
+});

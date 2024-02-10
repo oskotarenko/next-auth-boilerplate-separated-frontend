@@ -1,7 +1,5 @@
-import { NewVerificationForm } from "@/components/auth/NewVerificationForm";
+import { NewVerificationForm } from '@/components/auth/NewVerificationForm';
 
 export default function NewVerificationPage() {
-  return (
-    <NewVerificationForm />
-  )
+  return <NewVerificationForm />;
 }

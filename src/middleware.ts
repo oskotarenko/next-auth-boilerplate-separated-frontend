@@ -3,10 +3,10 @@ import {
   DEFAULT_AUTH_REDIRECT,
   apiAuthPrefix,
   authRoutes,
-  publicRoutes
+  publicRoutes,
 } from './routes';
-import authConfig from "./auth.config";
-import NextAuth from "next-auth";
+import authConfig from './auth.config';
+import NextAuth from 'next-auth';
 
 const { auth } = NextAuth(authConfig);
 
@@ -38,13 +38,18 @@ export default auth((req) => {
     }
 
     const encodedCallbackurl = encodeURIComponent(callbackUrl);
-    return Response.redirect(new URL(`${DEFAULT_AUTH_REDIRECT}?callbackUrl=${encodedCallbackurl}`, nextUrl));
+    return Response.redirect(
+      new URL(
+        `${DEFAULT_AUTH_REDIRECT}?callbackUrl=${encodedCallbackurl}`,
+        nextUrl
+      )
+    );
   }
 
   return null;
-})
+});
 
 // Optionally, don't invoke Middleware on some paths
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
-}
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+};

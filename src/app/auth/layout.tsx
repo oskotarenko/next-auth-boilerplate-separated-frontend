@@ -1,13 +1,13 @@
-import { ReactNode } from "react"
+import { ReactNode } from 'react';
 
 type Props = {
-  children: ReactNode
-}
+  children: ReactNode;
+};
 
 export default function AuthLayout({ children }: Props) {
   return (
-    <div className="flex items-center justify-center h-full bg-">
+    <div className='bg- flex h-full items-center justify-center'>
       {children}
     </div>
-  )
+  );
 }

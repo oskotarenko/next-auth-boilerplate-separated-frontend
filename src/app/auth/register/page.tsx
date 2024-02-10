@@ -1,8 +1,6 @@
-import { RegisterForm } from "@/components/auth/RegisterForm"
+import { RegisterForm } from '@/components/auth/RegisterForm';
 
-type Props = {}
-export default function RegisterPage({ }: Props) {
-  return (
-    <RegisterForm />
-  )
+type Props = {};
+export default function RegisterPage({}: Props) {
+  return <RegisterForm />;
 }

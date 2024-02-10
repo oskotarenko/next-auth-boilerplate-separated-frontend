@@ -1,15 +1,15 @@
-import { ReactNode } from "react"
-import NavBar from "./settings/_components/NavBar"
+import { ReactNode } from 'react';
+import NavBar from './settings/_components/NavBar';
 
 type Props = {
-  children: ReactNode
-}
+  children: ReactNode;
+};
 
 export default function ProtectedLayout({ children }: Props) {
   return (
-    <div className="flex flex-col gap-y-10 items-center justify-center h-full w-full">
+    <div className='flex h-full w-full flex-col items-center justify-center gap-y-10'>
       <NavBar />
       {children}
     </div>
-  )
+  );
 }

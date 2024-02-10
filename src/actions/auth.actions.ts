@@ -1,89 +1,66 @@
-"use server";
+'use server';
 
-import { getTwoFactorTokenByEmail } from '@/data/two-factor-token';
-import { signIn, signOut } from "../auth";
-import { getUserByEmail } from "@/data/user";
-import { db } from "@/lib/db";
-import { generatePasswordResetToken, generateTwoFactorToken, generateVerificationToken } from "@/lib/tokens";
-import { DEFAULT_LOGGED_IN_REDIRECT } from "@/routes";
-import { LoginScheme, NewPasswordScheme, RegisterScheme, ResetScheme } from "@/schemes";
-import bcrypt from "bcryptjs";
-import { AuthError } from "next-auth";
-import * as z from "zod";
-import { sendPasswordResetEmail, sendTwoFactorTokenEmail, sendVerificationEmail } from '@/lib/mail';
-import { getVerificationTokenByToken } from "@/data/verification-token";
-import { getPasswordResetTokenByToken } from "@/data/password-reset-token";
-import { getTwoFactorConfirmationByUserId } from '@/data/two-factor-confirmation';
+import { signIn, signOut } from '../auth';
+import { DEFAULT_LOGGED_IN_REDIRECT } from '@/routes';
+import {
+  LoginScheme,
+  NewPasswordScheme,
+  RegisterScheme,
+  ResetScheme,
+} from '@/schemes';
+import { AuthError } from 'next-auth';
+import { fetchService } from '@/lib/fetch.service';
+import {
+  LoginResponse,
+  NewPasswordResponse,
+  NewVerificationResponse,
+  RegisterResponse,
+  ResetPasswordResponse,
+} from '@/types/actions/auth.response';
+import { Account, TwoFactorConfirmation } from '@prisma/client';
+import { ApiMessageResponse } from '@/types/actions/api.response';
+import { z } from 'zod';
 
-export async function login(values: z.infer<typeof LoginScheme>, callbackUrl: string | null) {
+export async function login(
+  values: z.infer<typeof LoginScheme>,
+  callbackUrl: string | null
+) {
   const validatedField = LoginScheme.safeParse(values);
-
-  if (!validatedField.success) return { error: "invalid fields" };
+  if (!validatedField.success) return { error: 'invalid fields' };
 
   const { email, password, code } = validatedField.data;
 
-  const existingUser = await getUserByEmail(email);
-
-  if (!existingUser || !existingUser.email || !existingUser.password) {
-    return { error: "Invalid credentials" }
-  }
-  if (!existingUser.emailVerified) {
-    const verificationToken = await generateVerificationToken(email);
-    await sendVerificationEmail(verificationToken.email, verificationToken.token);
-
-    return { success: "Confirmation email sent" };
+  const response = await fetchService.post<LoginResponse>('/auth/login', {
+    email,
+    code,
+  });
+  if (response.success) {
+    return { success: response.success };
   }
 
-  if (existingUser.isTwoFactorEnabled && existingUser.email) {
-    if (code) {
-      const twoFactorToken = await getTwoFactorTokenByEmail(existingUser.email);
-      if (!twoFactorToken || twoFactorToken.token !== code) {
-        return { error: "Invalid code" };
-      }
+  if (response.error) {
+    return { error: response.error };
+  }
 
-      const isExpired = new Date() > new Date(twoFactorToken.expires);
-      if (isExpired) {
-        return { error: "Code expired" };
-      }
-
-      await db.twoFactorToken.delete({ where: { id: twoFactorToken.id } });
-
-      const existingConfirmation = await getTwoFactorConfirmationByUserId(existingUser.id);
-
-      if (existingConfirmation) {
-        await db.twoFactorConfirmation.delete({ where: { id: existingConfirmation.id } });
-      }
-
-      await db.twoFactorConfirmation.create({
-        data: {
-          userId: existingUser.id
-        }
-      })
-    } else {
-      const twoFactorToken = await generateTwoFactorToken(existingUser.email);
-      await sendTwoFactorTokenEmail(twoFactorToken.email, twoFactorToken.token);
-
-      return { twoFactor: true };
-    }
+  if (response.twoFactor) {
+    return { twoFactor: response.twoFactor };
   }
 
   try {
-    await signIn("credentials",
-      {
-        email,
-        password,
-        redirectTo: callbackUrl || DEFAULT_LOGGED_IN_REDIRECT
-      },
-    )
+    await signIn('credentials', {
+      email,
+      password,
+      redirectTo: callbackUrl || DEFAULT_LOGGED_IN_REDIRECT,
+    });
   } catch (error) {
     if (error instanceof AuthError) {
       switch (error.type) {
-        case "CredentialsSignin":
-          return { error: "Invalid credentails" };
-        case "AuthorizedCallbackError":
-          return { error: "Account verification error occured" }
+        case 'CredentialsSignin':
+          return { error: 'Invalid credentails' };
+        case 'AuthorizedCallbackError':
+          return { error: 'Account verification error occured' };
         default:
-          return { error: "Something went wrong" };
+          return { error: 'Something went wrong' };
       }
     } else {
       throw error;
@@ -91,106 +68,93 @@ export async function login(values: z.infer<typeof LoginScheme>, callbackUrl: st
   }
 }
 
-export async function register(values: z.infer<typeof RegisterScheme>) {
+export async function register(
+  values: z.infer<typeof RegisterScheme>
+): Promise<RegisterResponse> {
   const validatedFields = RegisterScheme.safeParse(values);
+  if (!validatedFields.success) return { error: 'invalid fields' };
 
-  if (!validatedFields.success) return { error: "invalid fields" };
-
-  const { email, password, name } = validatedFields.data;
-
-  const isEmailTaken = !!await getUserByEmail(email);
-  if (isEmailTaken) return { error: "Email already in use" };
-
-  const hashPassword = await bcrypt.hash(password, 10);
-
-  const user = await db.user.create({
-    data: {
-      email,
-      name,
-      password: hashPassword
-    }
-  });
-
-  const verificationToken = await generateVerificationToken(email);
-
-  await sendVerificationEmail(verificationToken.email, verificationToken.token);
-
-  return { success: "Confirmation email sent" };
-}
-
-export async function newVerification(token: string) {
-  const existingToken = await getVerificationTokenByToken(token);
-
-  if (!existingToken)
-    return { error: "Token does not exist" }
-
-  const isExpired = new Date() > new Date(existingToken.expires);
-  if (isExpired) return { error: "Token has expired" }
-
-  const existingUser = await getUserByEmail(existingToken.email);
-  if (!existingUser) return { error: "User does not exist" }
-
-  await db.user.update({
-    where: { id: existingUser.id },
-    data: {
-      email: existingUser.email,
-      emailVerified: new Date(),
-    }
-  });
-
-  await db.verificationToken.delete({ where: { id: existingToken.id } });
-
-  return { success: "Email verified" };
-}
-
-export async function reset(values: z.infer<typeof ResetScheme>) {
-  const validatedFields = ResetScheme.safeParse(values);
-
-  if (!validatedFields.success) return { error: "invalid email" };
-
-  const { email } = validatedFields.data;
-
-  const existingUser = await getUserByEmail(email);
-  if (!existingUser) return { error: "Email not found" };
-
-  const passwordResetToken = await generatePasswordResetToken(email);
-
-  await sendPasswordResetEmail(passwordResetToken.email, passwordResetToken.token);
-
-  return { success: "Reset email sent" };
-}
-
-export async function newPassword(values: z.infer<typeof NewPasswordScheme>, token: string) {
-  const existingToken = await getPasswordResetTokenByToken(token);
-  if (!existingToken)
-    return { error: "Token does not exist" }
-
-  const isExpired = new Date() > new Date(existingToken.expires);
-  if (isExpired) return { error: "Token has expired" }
-
-  const existingUser = await getUserByEmail(existingToken.email);
-  if (!existingUser) return { error: "User does not exist" }
-
-  const verifiedFields = NewPasswordScheme.safeParse(values);
-  if (!verifiedFields.success) return { error: "Invalid password" };
-
-  const { password, confirmPassword } = verifiedFields.data;
-  if (password !== confirmPassword) return { error: "Passwords must be equal" };
-
-  const hashPassword = await bcrypt.hash(password, 10);
-
-  await db.user.update({
-    where: { id: existingUser.id },
-    data: { password: hashPassword }
-  });
-
-  await db.passwordResetToken.delete({ where: { id: existingToken.id } });
-
-  return { success: "Password updated" };
+  const response = await fetchService.post<RegisterResponse>(
+    '/auth/register',
+    validatedFields.data
+  );
+  return response;
 }
 
 // Allows to do something on user logout and also can be use in client components
-export async function logout() {
-  await signOut()
+export async function logout(): Promise<void> {
+  await signOut();
 }
 
+export async function newVerification(
+  token: string
+): Promise<NewVerificationResponse> {
+  const response = await fetchService.post<NewVerificationResponse>(
+    '/auth/new-verification',
+    { token }
+  );
+  return response;
+}
+
+export async function resetPassword(
+  values: z.infer<typeof ResetScheme>
+): Promise<ResetPasswordResponse> {
+  const validatedFields = ResetScheme.safeParse(values);
+  if (!validatedFields.success) return { error: 'invalid email' };
+
+  const response = await fetchService.post<ResetPasswordResponse>(
+    '/auth/reset-password',
+    validatedFields.data
+  );
+  return response;
+}
+
+export async function newPassword(
+  values: z.infer<typeof NewPasswordScheme>,
+  token: string
+): Promise<NewPasswordResponse> {
+  const verifiedFields = NewPasswordScheme.safeParse(values);
+  if (!verifiedFields.success) return { error: 'Invalid data provided' };
+
+  const { password, confirmPassword } = verifiedFields.data;
+  if (password !== confirmPassword) return { error: 'Passwords must be equal' };
+
+  const response = await fetchService.post<NewPasswordResponse>(
+    '/auth/new-password',
+    { token, password }
+  );
+  return response;
+}
+
+export async function getTwoFactorConfirmation(
+  userId: string
+): Promise<TwoFactorConfirmation | null> {
+  try {
+    const twoFactorConfirmation =
+      await fetchService.get<TwoFactorConfirmation | null>(
+        `/auth/two-factor-confirmation/${userId}`
+      );
+    return twoFactorConfirmation;
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteTwoFactorConfirmation(
+  confirmationId: string
+): Promise<ApiMessageResponse> {
+  return await fetchService.delete<ApiMessageResponse>(
+    `/auth/two-factor-confirmation/${confirmationId}`
+  );
+}
+
+export async function getAccount(userId: string): Promise<Account | null> {
+  try {
+    const account = await fetchService.get<Account | null>(
+      `/auth/account/${userId}`
+    );
+    return account;
+  } catch {
+    return null;
+  }
+}

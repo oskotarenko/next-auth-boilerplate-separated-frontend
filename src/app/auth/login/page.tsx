@@ -1,8 +1,6 @@
-import { LoginForm } from "@/components/auth/LoginForm"
+import { LoginForm } from '@/components/auth/LoginForm';
 
-type Props = {}
-export default function LoginPage({ }: Props) {
-  return (
-    <LoginForm />
-  )
+type Props = {};
+export default function LoginPage({}: Props) {
+  return <LoginForm />;
 }
